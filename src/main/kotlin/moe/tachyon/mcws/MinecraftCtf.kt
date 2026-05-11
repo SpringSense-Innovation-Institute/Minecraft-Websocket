@@ -11,12 +11,35 @@ import taboolib.common.platform.Plugin
 import taboolib.common.platform.function.info
 import taboolib.common.platform.function.submit
 import taboolib.common.platform.function.warning
+import taboolib.platform.BukkitPlugin
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 
 object MinecraftWebsocketPlugin: Plugin()
 {
-    val server by lazy { SimpleServer(8080) }
+    val config by lazy()
+    {
+        val file = BukkitPlugin.getInstance().dataFolder.resolve("config.json")
+        if (!file.exists())
+        {
+            file.parentFile?.mkdirs()
+            file.writeText(Json.encodeToString(Config(port = 8080)))
+            return@lazy Config(port = 8080)
+        }
+        else
+        {
+            runCatching()
+            {
+                Json.decodeFromString<Config>(file.readText())
+            }.getOrElse()
+            {
+                file.writeText(Json.encodeToString(Config(port = 8080)))
+                return@lazy Config(port = 8080)
+            }
+        }
+    }
+
+    val server by lazy { SimpleServer(config.port) }
 
     override fun onEnable()
     {
@@ -30,6 +53,10 @@ object MinecraftWebsocketPlugin: Plugin()
         Client.closeAll()
     }
 }
+
+data class Config(
+    val port: Int,
+)
 
 class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 {
