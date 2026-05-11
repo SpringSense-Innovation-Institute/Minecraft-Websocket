@@ -119,7 +119,8 @@ class Client(
             .map { entity ->
                 Status.EntityInfo(
                     id = entity.uniqueId.toKotlinUuid().toHexString(),
-                    type = entity.type.name,
+                    type = entity.type.key.toString(),
+                    name = if (entity is Player) entity.name else entity.customName,
                     x = entity.location.x,
                     y = entity.location.y,
                     z = entity.location.z,
@@ -170,7 +171,7 @@ class Client(
                     val blockZ = (c.z shl 4) + ((i shr 8) and 0xF)
                     val blk = player.world.getBlockAt(blockX, blockY, blockZ)
                     Status.BlockInfo(
-                        type = blk.type.name,
+                        type = blk.type.key.toString(),
                         passable = blk.isPassable,
                     )
                 }
@@ -186,7 +187,7 @@ class Client(
             chunk?.set(
                 ((block.z and 0xF) shl 8) or ((block.y and 0xF) shl 4) or (block.x and 0xF),
                 Status.BlockInfo(
-                    type = block.type.name,
+                    type = block.type.key.toString(),
                     passable = block.isPassable,
                 )
             )
@@ -196,7 +197,7 @@ class Client(
                 y = block.y,
                 z = block.z,
                 block = Status.BlockInfo(
-                    type = block.type.name,
+                    type = block.type.key.toString(),
                     passable = block.isPassable,
                 ),
             )
@@ -207,7 +208,7 @@ class Client(
         val backpack = player.inventory.contents.filterNotNull().map()
         { item ->
             Status.ItemInfo(
-                type = item.type.name,
+                type = item.type.key.toString(),
                 amount = item.amount,
             )
         }
@@ -247,7 +248,7 @@ class Client(
 
             val chunk = existingChunks[Status.KeepChunkInfo(blockChunkX, blockChunkY, blockChunkZ)]
 
-            if (chunk != null && chunk[blockIndex] != Status.BlockInfo(block.type.name, block.isPassable))
+            if (chunk != null && chunk[blockIndex] != Status.BlockInfo(block.type.key.toString(), block.isPassable))
                 unupdatedBlocks.add(block)
         }
     }
@@ -262,7 +263,7 @@ class Client(
         fun get(name: String): Client? = clients[name]
         fun closeAll()
         {
-            clients.values.forEach { it.close() }
+            clients.values.forEach(Client::close)
             clients.clear()
         }
 

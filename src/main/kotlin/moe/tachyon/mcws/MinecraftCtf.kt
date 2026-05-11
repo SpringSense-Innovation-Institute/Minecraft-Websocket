@@ -161,7 +161,14 @@ data class Status(
     @Serializable
     data class Location(val x: Double, val y: Double, val z: Double)
     @Serializable
-    data class EntityInfo(val id: String, val type: String, val x: Double, val y: Double, val z: Double)
+    data class EntityInfo(
+        val id: String,
+        val type: String,
+        val name: String?,
+        val x: Double,
+        val y: Double,
+        val z: Double
+    )
     @Serializable
     data class KeepChunkInfo(val x: Int, val y: Int, val z: Int)
     @Serializable
