@@ -167,7 +167,11 @@ data class Status(
         val name: String?,
         val x: Double,
         val y: Double,
-        val z: Double
+        val z: Double,
+        val helmet: String?,
+        val chestplate: String?,
+        val leggings: String?,
+        val boots: String?,
     )
     @Serializable
     data class KeepChunkInfo(val x: Int, val y: Int, val z: Int)

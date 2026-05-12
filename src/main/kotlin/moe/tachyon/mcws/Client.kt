@@ -3,9 +3,12 @@
 package moe.tachyon.mcws
 
 import org.bukkit.Bukkit
+import org.bukkit.Material
 import org.bukkit.block.Block
+import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import taboolib.common.platform.function.submit
+import taboolib.platform.util.isNotAir
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.uuid.ExperimentalUuidApi
@@ -124,6 +127,10 @@ class Client(
                     x = entity.location.x,
                     y = entity.location.y,
                     z = entity.location.z,
+                    helmet = (entity as? LivingEntity)?.equipment?.helmet?.type?.takeUnless(Material::isAir)?.key?.toString(),
+                    chestplate = (entity as? LivingEntity)?.equipment?.chestplate?.type?.takeUnless(Material::isAir)?.key?.toString(),
+                    leggings = (entity as? LivingEntity)?.equipment?.leggings?.type?.takeUnless(Material::isAir)?.key?.toString(),
+                    boots = (entity as? LivingEntity)?.equipment?.boots?.type?.takeUnless(Material::isAir)?.key?.toString(),
                 )
             }
         val playerChunkX = player.location.blockX shr 4
