@@ -71,6 +71,7 @@ abstract class BotNMSHandler
     }
 }
 
+@Suppress("unused")
 class BotNMSHandlerImpl: BotNMSHandler()
 {
     override fun spawnFakePlayer(

@@ -54,6 +54,7 @@ object MinecraftWebsocketPlugin: Plugin()
     }
 }
 
+@Serializable
 data class Config(
     val port: Int,
 )
