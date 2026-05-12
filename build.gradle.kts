@@ -44,22 +44,13 @@ taboolib {
             name("CyanTachyon")
         }
     }
-    version { taboolib = "6.2.4-6b473c4" }
-    relocate("top.maplex.arim", "moe.tachyon.mcws.arim")
+    version { taboolib = "6.3.0-932e79c" }
     relocate("kotlinx.serialization", "moe.tachyon.mcws.kotlinx.serialization")
     relocate("org.java-websocket", "moe.tachyon.mcws.org.java_websocket")
 }
 
 repositories {
     mavenCentral()
-//    maven {
-//        url = uri("https://nexus.maplex.top/repository/maven-public/")
-//        isAllowInsecureProtocol = true
-//    }
-//    maven {
-//        name = "papermc"
-//        url = uri("https://repo.papermc.io/repository/maven-public/")
-//    }
 }
 
 dependencies {
@@ -73,9 +64,6 @@ dependencies {
     taboo("org.java-websocket:Java-WebSocket:1.6.0")
     taboo("com.github.luben:zstd-jni:1.5.7-8")
 
-
-//    compileOnly("net.kyori:adventure-api:4.26.1")
-//    taboo("top.maplex.arim:Arim:1.3.12")
     compileOnly(fileTree("libs"))
 }
 
