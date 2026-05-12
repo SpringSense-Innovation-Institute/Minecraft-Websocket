@@ -212,7 +212,7 @@ class Client(
 
         unupdatedBlocks.clear()
 
-        val backpack = player.inventory.contents.filterNotNull().map()
+        val backpack = player.inventory.contents.filterNotNull().filter { it.type.isNotAir() }.map()
         { item ->
             Status.ItemInfo(
                 type = item.type.key.toString(),
