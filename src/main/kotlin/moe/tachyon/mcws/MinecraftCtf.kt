@@ -89,29 +89,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
         {
             is ReceivedMessage.Chat  -> bots[conn]?.chat(msg.message)
             is ReceivedMessage.Input -> bots[conn]?.input = msg.input
-            is ReceivedMessage.Login ->
-            {
-                synchronized(conn)
-                {
-                    if (bots.containsKey(conn))
-                        submit { bots[conn]?.close() }
-                    val client = Client(msg.name)
-
-                    client.init()
-                    { status ->
-                        runCatching()
-                        {
-                            conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
-                        }.onFailure()
-                        {
-                            warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
-                            close(conn)
-                        }
-                    }
-
-                    bots[conn] = client
-                }
-            }
+            is ReceivedMessage.Login -> submit { login(conn, msg) }
         }
     }
 
@@ -125,9 +103,46 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     override fun onStart() = info("服务器已启动!")
 
+    private fun login(conn: WebSocket, msg: ReceivedMessage.Login)
+    {
+        synchronized(conn)
+        {
+            if (!conn.isOpen) return
+
+            runCatching { bots.remove(conn)?.close() }.onFailure(::warning)
+
+            val client = Client(msg.name)
+            runCatching()
+            {
+                client.init()
+                { status ->
+                    runCatching()
+                    {
+                        conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
+                    }.onFailure()
+                    {
+                        warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+                        close(conn)
+                    }
+                }
+            }.onSuccess()
+            {
+                if (conn.isOpen)
+                    bots[conn] = client
+                else
+                    client.close()
+            }.onFailure()
+            {
+                warning("failed to initialize player ${msg.name} from ${conn.remoteSocketAddress}: ${it.message}")
+                client.close()
+                conn.close()
+            }
+        }
+    }
+
     private fun close(conn: WebSocket)
     {
-        val bot = synchronized(this) { bots.remove(conn) } ?: return
+        val bot = synchronized(conn) { bots.remove(conn) } ?: return
         submit { bot.close() }
     }
 }
