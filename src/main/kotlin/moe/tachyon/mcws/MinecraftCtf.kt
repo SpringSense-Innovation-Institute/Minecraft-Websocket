@@ -130,8 +130,14 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     }
 
 
-    override fun onError(conn: WebSocket, ex: Exception)
+    override fun onError(conn: WebSocket?, ex: Exception)
     {
+        if (conn == null)
+        {
+            warning("websocket server error: ${ex.message}")
+            return
+        }
+
         info("an error occurred on connection ${conn.remoteSocketAddress}: ${ex.message}")
         conn.close()
         close(conn)
