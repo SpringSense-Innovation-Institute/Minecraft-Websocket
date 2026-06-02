@@ -32,7 +32,7 @@ class Client(
     private var tickTask: PlatformTask? = null
     private var statusTask: PlatformTask? = null
 
-    fun init(updateStatus: (Status) -> Unit)
+    fun init(updateStatus: (Status) -> Unit, closeConnection: () -> Unit)
     {
         synchronized(this)
         {
@@ -61,7 +61,7 @@ class Client(
                     val queueFull = synchronized(statusList) { statusList.size >= MAX_PENDING_STATUSES }
                     if (queueFull)
                     {
-                        close()
+                        closeConnection()
                         return@submit
                     }
 

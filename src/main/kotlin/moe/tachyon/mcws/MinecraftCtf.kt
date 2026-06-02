@@ -178,8 +178,13 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
             val client = Client(msg.name)
             runCatching()
             {
-                client.init()
-                { status -> sendStatus(conn, status) }
+                client.init(
+                    updateStatus = { status -> sendStatus(conn, status) },
+                    closeConnection = {
+                        conn.close()
+                        close(conn)
+                    }
+                )
             }.onSuccess()
             {
                 if (conn.isOpen)
