@@ -21,10 +21,17 @@ class Client(
     var input = PlayerInput.EMPTY
         set(value) = synchronized(this) { field = value }
 
+    @Volatile
     private var closed = false
+    @Volatile
     private var init = false
     private lateinit var player: Player
     private val msg = mutableListOf<String>()
+
+    @Volatile
+    private var pendingStatus: Status? = null
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private val statusLock = Any() as Object
 
     fun init(updateStatus: (Status) -> Unit)
     {
@@ -44,16 +51,14 @@ class Client(
 
                 clients[name] = this
 
-                val statusList = mutableListOf<Status>()
-
                 submit(period = 1)
                 {
                     if (closed) return@submit cancel()
-                    val newStatus = tick()
-                    synchronized(statusList)
+                    synchronized(statusLock)
                     {
-                        statusList.add(newStatus)
-                        (statusList as Object).notifyAll()
+                        val newStatus = tick(pendingStatus == null)
+                        if (newStatus != null) pendingStatus = newStatus
+                        statusLock.notifyAll()
                     }
                 }
 
@@ -62,15 +67,13 @@ class Client(
                     while (true)
                     {
                         if (closed) return@submit
-                        val status = synchronized(statusList)
+                        val status = synchronized(statusLock)
                         {
-                            while (statusList.isEmpty() && !closed)
-                                (statusList as Object).wait(1000)
-                            val tmp = statusList.toList()
-                            statusList.clear()
-                            tmp
+                            while (pendingStatus == null && !closed)
+                                statusLock.wait(1000)
+                            pendingStatus.also { pendingStatus = null }
                         }
-                        status.forEach { updateStatus(it) }
+                        updateStatus(status ?: continue)
                     }
                 }
             }
@@ -86,6 +89,8 @@ class Client(
                 if (closed) return
                 closed = true
                 clients.remove(name)
+                existingChunks.clear()
+                unupdatedBlocks.clear()
                 if (!init) return
                 player.kickPlayer(null)
             }
@@ -103,11 +108,12 @@ class Client(
 
     private val existingChunks = mutableMapOf<Status.KeepChunkInfo, MutableList<Status.BlockInfo>>()
 
-    fun tick(): Status = synchronized(this)
+    fun tick(getStatus: Boolean): Status? = synchronized(this)
     {
-        if (closed || !init) return Status.EMPTY
+        if (closed || !init) return null
         BotNMSHandler.instance.tickBot(player, input)
         input = input.copy(attack = null)
+        if (!getStatus) return null
 
         if (player.world.name != lastWorld)
         {
@@ -264,7 +270,7 @@ class Client(
     {
         const val LOAD_CHUNK_RADIUS = 3
         const val UNLOAD_CHUNK_RADIUS = 4
-        const val VIEW_ENTITY_RADIUS = 3 * 16
+        const val VIEW_ENTITY_RADIUS = LOAD_CHUNK_RADIUS * 16
 
         private val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
