@@ -171,7 +171,8 @@ class Client(
         }
 
         val keepChunks = chunks.filter { it in existingChunks }
-        val newChunks = chunks.filter { it !in existingChunks }.take(MAX_NEW_CHUNK_PER_TICK).map()
+        val newChunkLimit = reserveNewChunkBudget(MAX_NEW_CHUNK_PER_TICK)
+        val newChunks = chunks.filter { it !in existingChunks }.take(newChunkLimit).map()
         { c ->
             Status.NewChunkInfo(
                 x = c.x,
@@ -272,8 +273,27 @@ class Client(
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = LOAD_CHUNK_RADIUS * 16
         const val MAX_NEW_CHUNK_PER_TICK = 16
+        const val MAX_NEW_CHUNK_PER_SERVER_TICK = 128
 
         private val clients = ConcurrentHashMap<String, Client>()
+        private val newChunkBudgetLock = Any()
+        private var remainingNewChunkBudget = MAX_NEW_CHUNK_PER_SERVER_TICK
+
+        fun resetNewChunkBudget()
+        {
+            synchronized(newChunkBudgetLock)
+            {
+                remainingNewChunkBudget = MAX_NEW_CHUNK_PER_SERVER_TICK
+            }
+        }
+
+        private fun reserveNewChunkBudget(limit: Int): Int = synchronized(newChunkBudgetLock)
+        {
+            val reserved = minOf(limit, remainingNewChunkBudget)
+            remainingNewChunkBudget -= reserved
+            reserved
+        }
+
         fun get(name: String): Client? = clients[name]
         fun closeAll()
         {

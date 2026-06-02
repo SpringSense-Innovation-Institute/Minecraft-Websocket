@@ -43,6 +43,7 @@ object MinecraftWebsocketPlugin: Plugin()
 
     override fun onEnable()
     {
+        submit(period = 1) { Client.resetNewChunkBudget() }
         server.start()
     }
 
