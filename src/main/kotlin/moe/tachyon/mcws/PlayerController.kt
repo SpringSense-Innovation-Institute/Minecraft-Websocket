@@ -26,7 +26,6 @@ import org.bukkit.craftbukkit.v1_21_R1.entity.CraftEntity
 import org.bukkit.craftbukkit.v1_21_R1.entity.CraftPlayer
 import org.bukkit.entity.Player
 import org.bukkit.event.player.PlayerMoveEvent
-import taboolib.common.platform.function.submit
 import taboolib.common.util.unsafeLazy
 import taboolib.module.nms.nmsProxy
 import java.net.InetSocketAddress
@@ -80,6 +79,8 @@ class BotNMSHandlerImpl: BotNMSHandler()
         msgListener: (msg: String) -> Unit,
     ): Player
     {
+        check(Bukkit.isPrimaryThread()) { "Fake players must be spawned on the server thread" }
+
         val nmsServer = (Bukkit.getServer() as CraftServer).server
         val nmsWorld = (location.world as CraftWorld).handle
         val profile = GameProfile(Bukkit.getOfflinePlayer(name).uniqueId, name)
@@ -130,7 +131,7 @@ class BotNMSHandlerImpl: BotNMSHandler()
         bot.yRot = location.yaw
         bot.xRot = location.pitch
 
-        submit { nmsServer.playerList.placeNewPlayer(fakeConnection, bot, cookie) }
+        nmsServer.playerList.placeNewPlayer(fakeConnection, bot, cookie)
 
         return CraftPlayer(
             Bukkit.getServer() as CraftServer,
