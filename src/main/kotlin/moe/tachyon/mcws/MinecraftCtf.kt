@@ -1,9 +1,12 @@
+@file:OptIn(ExperimentalAtomicApi::class)
+
 package moe.tachyon.mcws
 
 import com.github.luben.zstd.Zstd
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import moe.tachyon.mcws.MinecraftWebsocketPlugin.wait
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
@@ -14,6 +17,8 @@ import taboolib.common.platform.function.warning
 import taboolib.platform.BukkitPlugin
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 object MinecraftWebsocketPlugin: Plugin()
 {
@@ -40,10 +45,12 @@ object MinecraftWebsocketPlugin: Plugin()
     }
 
     val server by lazy { SimpleServer(config.port) }
+    val wait = AtomicBoolean(false)
 
     override fun onEnable()
     {
         server.start()
+        submit(period = 1) { wait.store(false) }
     }
 
     override fun onDisable()
@@ -87,8 +94,8 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
         when (msg)
         {
-            is ReceivedMessage.Chat  -> bots[conn]?.chat(msg.message)
-            is ReceivedMessage.Input -> bots[conn]?.input = msg.input
+            is ReceivedMessage.Chat  -> synchronized(conn) { bots[conn]?.chat(msg.message) }
+            is ReceivedMessage.Input -> synchronized(conn) { bots[conn]?.input = msg.input }
             is ReceivedMessage.Login ->
             {
                 synchronized(conn)
@@ -96,6 +103,10 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
                     if (bots.containsKey(conn))
                         submit { bots[conn]?.close() }
                     val client = Client(msg.name)
+                    bots[conn] = client
+
+                    while (wait.compareAndSet(expectedValue = true, newValue = false))
+                        Thread.sleep(50)
 
                     client.init()
                     { status ->
@@ -109,8 +120,6 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
                             close(conn)
                         }
                     }
-
-                    bots[conn] = client
                 }
             }
         }
