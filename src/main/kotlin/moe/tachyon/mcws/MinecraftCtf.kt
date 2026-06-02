@@ -63,8 +63,10 @@ object MinecraftWebsocketPlugin: Plugin()
 
     override fun onDisable()
     {
+        server.closeClients()
         Client.closeAll()
         runCatching { server.stop() }.onFailure(::warning)
+        server.closeClients()
         Client.closeAll()
     }
 }
@@ -160,6 +162,14 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     override fun onStart() = info("服务器已启动!")
 
+    fun closeClients()
+    {
+        bufferedStatusTicks.clear()
+        val clients = bots.values.toList()
+        bots.clear()
+        clients.forEach(Client::close)
+    }
+
     private fun login(conn: WebSocket, msg: ReceivedMessage.Login)
     {
         synchronized(conn)
@@ -224,7 +234,10 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     {
         bufferedStatusTicks.remove(conn)
         val bot = synchronized(conn) { bots.remove(conn) } ?: return
-        submit { bot.close() }
+        if (org.bukkit.Bukkit.isPrimaryThread())
+            bot.close()
+        else
+            submit { bot.close() }
     }
 
     companion object
