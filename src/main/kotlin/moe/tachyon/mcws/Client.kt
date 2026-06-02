@@ -197,7 +197,7 @@ class Client(
         }
 
         val keepChunks = chunks.filter { it in existingChunks }
-        val newChunks = chunks.filter { it !in existingChunks }.map()
+        val newChunks = chunks.filter { it !in existingChunks }.take(MAX_NEW_CHUNKS_PER_STATUS).map()
         { c ->
             Status.NewChunkInfo(
                 x = c.x,
@@ -297,6 +297,7 @@ class Client(
         const val LOAD_CHUNK_RADIUS = 3
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = 3 * 16
+        private const val MAX_NEW_CHUNKS_PER_STATUS = 1
         private const val MAX_PENDING_STATUSES = 5
 
         private val clients = ConcurrentHashMap<String, Client>()
