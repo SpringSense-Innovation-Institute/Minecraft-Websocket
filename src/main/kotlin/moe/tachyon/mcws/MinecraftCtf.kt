@@ -105,6 +105,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
                         }.onFailure()
                         {
                             warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+                            conn.close()
                             close(conn)
                         }
                     }
