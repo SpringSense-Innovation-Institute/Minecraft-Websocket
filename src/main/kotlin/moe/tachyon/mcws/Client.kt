@@ -171,7 +171,7 @@ class Client(
         }
 
         val keepChunks = chunks.filter { it in existingChunks }
-        val newChunks = chunks.filter { it !in existingChunks }.map()
+        val newChunks = chunks.filter { it !in existingChunks }.take(MAX_NEW_CHUNK_PER_TICK).map()
         { c ->
             Status.NewChunkInfo(
                 x = c.x,
@@ -248,7 +248,7 @@ class Client(
     {
         synchronized(this)
         {
-            if (closed || !init) return
+            if (closed || !init || block.world.name != lastWorld) return
             val blockChunkX = block.x shr 4
             val blockChunkY = block.y shr 4
             val blockChunkZ = block.z shr 4
@@ -271,6 +271,7 @@ class Client(
         const val LOAD_CHUNK_RADIUS = 3
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = LOAD_CHUNK_RADIUS * 16
+        const val MAX_NEW_CHUNK_PER_TICK = 3
 
         private val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
