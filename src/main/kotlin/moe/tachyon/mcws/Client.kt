@@ -137,7 +137,7 @@ class Client(
     private var lastWorld = ""
     private val unupdatedBlocks = mutableSetOf<Block>()
 
-    private val existingChunks = mutableMapOf<Status.KeepChunkInfo, MutableList<Status.BlockInfo>>()
+    private val existingChunks = mutableSetOf<Status.KeepChunkInfo>()
 
     fun tick(): Status = synchronized(this)
     {
@@ -191,12 +191,12 @@ class Client(
 
         for (c in existingChunks)
         {
-            if (Status.KeepChunkInfo(c.key.x, c.key.y, c.key.z) !in chunks &&
-                abs(c.key.x - playerChunkX) <= UNLOAD_CHUNK_RADIUS &&
-                abs(c.key.y - playerChunkY) <= UNLOAD_CHUNK_RADIUS &&
-                abs(c.key.z - playerChunkZ) <= UNLOAD_CHUNK_RADIUS)
+            if (c !in chunks &&
+                abs(c.x - playerChunkX) <= UNLOAD_CHUNK_RADIUS &&
+                abs(c.y - playerChunkY) <= UNLOAD_CHUNK_RADIUS &&
+                abs(c.z - playerChunkZ) <= UNLOAD_CHUNK_RADIUS)
             {
-                chunks.add(Status.KeepChunkInfo(c.key.x, c.key.y, c.key.z))
+                chunks.add(c)
             }
         }
 
@@ -221,20 +221,11 @@ class Client(
             )
         }
 
-        existingChunks.keys.removeIf { it !in keepChunks }
-        existingChunks += newChunks.map { Status.KeepChunkInfo(it.x, it.y, it.z) to it.blocks }
+        existingChunks.removeIf { it !in keepChunks }
+        existingChunks += newChunks.map { Status.KeepChunkInfo(it.x, it.y, it.z) }
 
         val updateBlocks = unupdatedBlocks.map()
         { block ->
-            val chunk = existingChunks[Status.KeepChunkInfo(block.x shr 4, block.y shr 4, block.z shr 4)]
-            chunk?.set(
-                ((block.z and 0xF) shl 8) or ((block.y and 0xF) shl 4) or (block.x and 0xF),
-                Status.BlockInfo(
-                    type = block.type.key.toString(),
-                    passable = block.isPassable,
-                )
-            )
-
             Status.UpdateBlockInfo(
                 x = block.x,
                 y = block.y,
@@ -283,15 +274,7 @@ class Client(
             val blockChunkY = block.y shr 4
             val blockChunkZ = block.z shr 4
 
-            val x = block.x and 0xF
-            val y = block.y and 0xF
-            val z = block.z and 0xF
-
-            val blockIndex = (z shl 8) or (y shl 4) or x
-
-            val chunk = existingChunks[Status.KeepChunkInfo(blockChunkX, blockChunkY, blockChunkZ)]
-
-            if (chunk != null && chunk[blockIndex] != Status.BlockInfo(block.type.key.toString(), block.isPassable))
+            if (Status.KeepChunkInfo(blockChunkX, blockChunkY, blockChunkZ) in existingChunks)
                 unupdatedBlocks.add(block)
         }
     }
