@@ -208,8 +208,8 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     companion object
     {
-        private const val MAX_MESSAGE_CHARS = 8192
-        private const val MAX_CHAT_CHARS = 256
+        private const val MAX_MESSAGE_CHARS = 16384
+        private const val MAX_CHAT_CHARS = 8192
         private const val MAX_BUFFERED_STATUS_TICKS = 100
         private val PLAYER_NAME = Regex("^[A-Za-z0-9_]{1,16}$")
         private val ATTACK_ID = Regex("^[0-9a-fA-F]{32}$")
