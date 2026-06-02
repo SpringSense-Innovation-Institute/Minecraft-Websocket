@@ -58,11 +58,18 @@ class Client(
                         return@submit
                     }
 
+                    val queueFull = synchronized(statusList) { statusList.size >= MAX_PENDING_STATUSES }
+                    if (queueFull)
+                    {
+                        close()
+                        return@submit
+                    }
+
                     val newStatus = tick()
                     synchronized(statusList)
                     {
-                        while (statusList.size >= MAX_PENDING_STATUSES)
-                            statusList.removeAt(0)
+                        if (closed)
+                            return@submit
                         statusList.add(newStatus)
                         (statusList as Object).notifyAll()
                     }

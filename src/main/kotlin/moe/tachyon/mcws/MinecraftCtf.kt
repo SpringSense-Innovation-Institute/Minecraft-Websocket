@@ -79,7 +79,6 @@ data class Config(
 class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 {
     private val bots = ConcurrentHashMap<WebSocket, Client>()
-    private val bufferedStatusTicks = ConcurrentHashMap<WebSocket, Int>()
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake)
     {
@@ -89,7 +88,6 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean)
     {
         info("connection closed from ${conn.remoteSocketAddress} with exit code $code additional info: $reason")
-        bufferedStatusTicks.remove(conn)
         close(conn)
     }
 
@@ -164,7 +162,6 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     fun closeClients()
     {
-        bufferedStatusTicks.clear()
         val clients = bots.values.toList()
         bots.clear()
         clients.forEach(Client::close)
@@ -206,20 +203,26 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
             return
         }
 
-        if (conn.hasBufferedData())
+        var bufferedChecks = 0
+        while (conn.isOpen && conn.hasBufferedData())
         {
-            val bufferedTicks = bufferedStatusTicks.compute(conn)
-            { _, value -> (value ?: 0) + 1 } ?: 1
-            if (bufferedTicks >= MAX_BUFFERED_STATUS_TICKS)
+            bufferedChecks++
+            if (bufferedChecks >= MAX_BUFFERED_STATUS_CHECKS)
             {
-                warning("closing slow status client ${conn.remoteSocketAddress}: websocket output stayed buffered for $bufferedTicks ticks")
+                warning("closing slow status client ${conn.remoteSocketAddress}: websocket output stayed buffered for $bufferedChecks checks")
                 conn.close()
                 close(conn)
+                return
             }
+            Thread.sleep(BUFFERED_STATUS_CHECK_INTERVAL_MS)
+        }
+
+        if (!conn.isOpen)
+        {
+            close(conn)
             return
         }
 
-        bufferedStatusTicks.remove(conn)
         runCatching()
         {
             conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
@@ -233,7 +236,6 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     private fun close(conn: WebSocket)
     {
-        bufferedStatusTicks.remove(conn)
         val bot = synchronized(conn) { bots.remove(conn) } ?: return
         if (org.bukkit.Bukkit.isPrimaryThread())
             bot.close()
@@ -245,7 +247,8 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     {
         private const val MAX_MESSAGE_CHARS = 8192
         private const val MAX_CHAT_CHARS = 256
-        private const val MAX_BUFFERED_STATUS_TICKS = 100
+        private const val MAX_BUFFERED_STATUS_CHECKS = 100
+        private const val BUFFERED_STATUS_CHECK_INTERVAL_MS = 50L
         private val PLAYER_NAME = Regex("^[A-Za-z0-9_]{1,16}$")
         private val ATTACK_ID = Regex("^[0-9a-fA-F]{32}$")
     }
