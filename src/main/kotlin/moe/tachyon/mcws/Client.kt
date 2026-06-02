@@ -271,7 +271,7 @@ class Client(
         const val LOAD_CHUNK_RADIUS = 3
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = LOAD_CHUNK_RADIUS * 16
-        const val MAX_NEW_CHUNK_PER_TICK = 3
+        const val MAX_NEW_CHUNK_PER_TICK = 16
 
         private val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
