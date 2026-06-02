@@ -48,7 +48,7 @@ class Client(
 
                 submit(period = 1)
                 {
-                    if (closed) return@submit
+                    if (closed) return@submit cancel()
                     val newStatus = tick()
                     synchronized(statusList)
                     {
