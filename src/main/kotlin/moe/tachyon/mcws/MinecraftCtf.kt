@@ -17,24 +17,39 @@ import java.util.concurrent.ConcurrentHashMap
 
 object MinecraftWebsocketPlugin: Plugin()
 {
+    private const val DEFAULT_PORT = 8080
+    private const val MIN_PORT = 1
+    private const val MAX_PORT = 65535
+
     val config by lazy()
     {
         val file = BukkitPlugin.getInstance().dataFolder.resolve("config.json")
+        val defaultConfig = Config(port = DEFAULT_PORT)
         if (!file.exists())
         {
             file.parentFile?.mkdirs()
-            file.writeText(Json.encodeToString(Config(port = 8080)))
-            return@lazy Config(port = 8080)
+            file.writeText(Json.encodeToString(defaultConfig))
+            return@lazy defaultConfig
         }
         else
         {
-            runCatching()
+            val loaded = runCatching()
             {
                 Json.decodeFromString<Config>(file.readText())
             }.getOrElse()
             {
-                file.writeText(Json.encodeToString(Config(port = 8080)))
-                return@lazy Config(port = 8080)
+                warning("failed to load websocket config, resetting to defaults: ${it.message}")
+                file.writeText(Json.encodeToString(defaultConfig))
+                return@lazy defaultConfig
+            }
+
+            if (loaded.port in MIN_PORT..MAX_PORT)
+                loaded
+            else
+            {
+                warning("invalid websocket port ${loaded.port}, resetting to $DEFAULT_PORT")
+                file.writeText(Json.encodeToString(defaultConfig))
+                defaultConfig
             }
         }
     }
