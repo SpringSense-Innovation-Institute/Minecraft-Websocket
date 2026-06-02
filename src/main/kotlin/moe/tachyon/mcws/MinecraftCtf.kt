@@ -78,6 +78,14 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     override fun onMessage(conn: WebSocket, message: String)
     {
+        if (message.length > MAX_MESSAGE_CHARS)
+        {
+            warning("closing ${conn.remoteSocketAddress}: websocket message exceeds $MAX_MESSAGE_CHARS characters")
+            conn.close()
+            close(conn)
+            return
+        }
+
         val msg = runCatching()
         {
             Json.decodeFromString<ReceivedMessage>(message)
@@ -87,12 +95,38 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
             return
         }
 
+        if (!validate(conn, msg))
+            return
+
         when (msg)
         {
             is ReceivedMessage.Chat  -> bots[conn]?.chat(msg.message)
             is ReceivedMessage.Input -> bots[conn]?.input = msg.input
             is ReceivedMessage.Login -> submit { login(conn, msg) }
         }
+    }
+
+    private fun validate(conn: WebSocket, msg: ReceivedMessage): Boolean
+    {
+        val reason = when (msg)
+        {
+            is ReceivedMessage.Login -> if (PLAYER_NAME.matches(msg.name)) null else "invalid player name"
+            is ReceivedMessage.Chat  -> if (msg.message.length <= MAX_CHAT_CHARS) null else "chat message exceeds $MAX_CHAT_CHARS characters"
+            is ReceivedMessage.Input -> when
+            {
+                msg.input.attack == null -> null
+                ATTACK_ID.matches(msg.input.attack) -> null
+                else -> "invalid attack id"
+            }
+        }
+
+        if (reason == null)
+            return true
+
+        warning("closing ${conn.remoteSocketAddress}: $reason")
+        conn.close()
+        close(conn)
+        return false
     }
 
 
@@ -174,7 +208,11 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
     companion object
     {
+        private const val MAX_MESSAGE_CHARS = 8192
+        private const val MAX_CHAT_CHARS = 256
         private const val MAX_BUFFERED_STATUS_TICKS = 100
+        private val PLAYER_NAME = Regex("^[A-Za-z0-9_]{1,16}$")
+        private val ATTACK_ID = Regex("^[0-9a-fA-F]{32}$")
     }
 }
 
