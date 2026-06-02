@@ -62,6 +62,7 @@ data class Config(
 class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 {
     private val bots = ConcurrentHashMap<WebSocket, Client>()
+    private val bufferedStatusTicks = ConcurrentHashMap<WebSocket, Int>()
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake)
     {
@@ -71,6 +72,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean)
     {
         info("connection closed from ${conn.remoteSocketAddress} with exit code $code additional info: $reason")
+        bufferedStatusTicks.remove(conn)
         close(conn)
     }
 
@@ -115,16 +117,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
             runCatching()
             {
                 client.init()
-                { status ->
-                    runCatching()
-                    {
-                        conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
-                    }.onFailure()
-                    {
-                        warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
-                        close(conn)
-                    }
-                }
+                { status -> sendStatus(conn, status) }
             }.onSuccess()
             {
                 if (conn.isOpen)
@@ -140,10 +133,48 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
         }
     }
 
+    private fun sendStatus(conn: WebSocket, status: Status)
+    {
+        if (!conn.isOpen)
+        {
+            close(conn)
+            return
+        }
+
+        if (conn.hasBufferedData())
+        {
+            val bufferedTicks = bufferedStatusTicks.compute(conn)
+            { _, value -> (value ?: 0) + 1 } ?: 1
+            if (bufferedTicks >= MAX_BUFFERED_STATUS_TICKS)
+            {
+                warning("closing slow status client ${conn.remoteSocketAddress}: websocket output stayed buffered for $bufferedTicks ticks")
+                conn.close()
+                close(conn)
+            }
+            return
+        }
+
+        bufferedStatusTicks.remove(conn)
+        runCatching()
+        {
+            conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
+        }.onFailure()
+        {
+            warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+            close(conn)
+        }
+    }
+
     private fun close(conn: WebSocket)
     {
+        bufferedStatusTicks.remove(conn)
         val bot = synchronized(conn) { bots.remove(conn) } ?: return
         submit { bot.close() }
+    }
+
+    companion object
+    {
+        private const val MAX_BUFFERED_STATUS_TICKS = 100
     }
 }
 

@@ -61,6 +61,8 @@ class Client(
                     val newStatus = tick()
                     synchronized(statusList)
                     {
+                        while (statusList.size >= MAX_PENDING_STATUSES)
+                            statusList.removeAt(0)
                         statusList.add(newStatus)
                         (statusList as Object).notifyAll()
                     }
@@ -288,6 +290,7 @@ class Client(
         const val LOAD_CHUNK_RADIUS = 3
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = 3 * 16
+        private const val MAX_PENDING_STATUSES = 5
 
         private val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
