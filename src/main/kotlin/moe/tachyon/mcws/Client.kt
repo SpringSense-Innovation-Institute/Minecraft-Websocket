@@ -4,6 +4,7 @@ package moe.tachyon.mcws
 
 import org.bukkit.Bukkit
 import org.bukkit.Material
+import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
@@ -21,10 +22,13 @@ class Client(
     var input = PlayerInput.EMPTY
         set(value) = synchronized(this) { field = value }
 
+    @Volatile
     private var closed = false
     private var init = false
     private lateinit var player: Player
     private val msg = mutableListOf<String>()
+    private val statusLock = Object()
+    private var pendingStatus: Status? = null
 
     fun init(updateStatus: (Status) -> Unit)
     {
@@ -44,16 +48,20 @@ class Client(
 
                 clients[name] = this
 
-                val statusList = mutableListOf<Status>()
-
                 submit(period = 1)
                 {
                     if (closed) return@submit cancel()
                     val newStatus = tick()
-                    synchronized(statusList)
+                    synchronized(statusLock)
                     {
-                        statusList.add(newStatus)
-                        (statusList as Object).notifyAll()
+                        val pending = pendingStatus
+                        pendingStatus = when
+                        {
+                            pending == null -> newStatus
+                            pending.newChunks.isNotEmpty() -> pending
+                            else -> newStatus
+                        }
+                        statusLock.notifyAll()
                     }
                 }
 
@@ -62,15 +70,16 @@ class Client(
                     while (true)
                     {
                         if (closed) return@submit
-                        val status = synchronized(statusList)
+                        val status = synchronized(statusLock)
                         {
-                            while (statusList.isEmpty() && !closed)
-                                (statusList as Object).wait(1000)
-                            val tmp = statusList.toList()
-                            statusList.clear()
+                            while (pendingStatus == null && !closed)
+                                statusLock.wait(1000)
+                            if (closed) return@submit
+                            val tmp = pendingStatus
+                            pendingStatus = null
                             tmp
                         }
-                        status.forEach { updateStatus(it) }
+                        status?.let(updateStatus)
                     }
                 }
             }
@@ -85,6 +94,11 @@ class Client(
             {
                 if (closed) return
                 closed = true
+                synchronized(statusLock)
+                {
+                    pendingStatus = null
+                    statusLock.notifyAll()
+                }
                 clients.remove(name)
                 if (!init) return
                 player.kickPlayer(null)
@@ -98,10 +112,11 @@ class Client(
             submit { player.chat(message) }
     }
 
+    @Volatile
     private var lastWorld = ""
     private val unupdatedBlocks = mutableSetOf<Block>()
 
-    private val existingChunks = mutableMapOf<Status.KeepChunkInfo, MutableList<Status.BlockInfo>>()
+    private val existingChunks = mutableSetOf<Status.KeepChunkInfo>()
 
     fun tick(): Status = synchronized(this)
     {
@@ -141,7 +156,7 @@ class Client(
 
         for (dx in -LOAD_CHUNK_RADIUS..LOAD_CHUNK_RADIUS)
         {
-            for (dy in -LOAD_CHUNK_RADIUS..LOAD_CHUNK_RADIUS)
+            for (dy in -LOAD_CHUNK_VERTICAL_RADIUS..LOAD_CHUNK_VERTICAL_RADIUS)
             {
                 for (dz in -LOAD_CHUNK_RADIUS..LOAD_CHUNK_RADIUS)
                 {
@@ -155,49 +170,41 @@ class Client(
 
         for (c in existingChunks)
         {
-            if (Status.KeepChunkInfo(c.key.x, c.key.y, c.key.z) !in chunks &&
-                abs(c.key.x - playerChunkX) <= UNLOAD_CHUNK_RADIUS &&
-                abs(c.key.y - playerChunkY) <= UNLOAD_CHUNK_RADIUS &&
-                abs(c.key.z - playerChunkZ) <= UNLOAD_CHUNK_RADIUS)
+            if (c !in chunks &&
+                abs(c.x - playerChunkX) <= UNLOAD_CHUNK_RADIUS &&
+                abs(c.y - playerChunkY) <= UNLOAD_CHUNK_RADIUS &&
+                abs(c.z - playerChunkZ) <= UNLOAD_CHUNK_RADIUS)
             {
-                chunks.add(Status.KeepChunkInfo(c.key.x, c.key.y, c.key.z))
+                chunks.add(c)
             }
         }
 
         val keepChunks = chunks.filter { it in existingChunks }
-        val newChunks = chunks.filter { it !in existingChunks }.map()
+        val newChunks = chunks
+            .asSequence()
+            .filter { it !in existingChunks }
+            .sortedWith(compareBy<Status.KeepChunkInfo>
+            {
+                abs(it.x - playerChunkX) + abs(it.y - playerChunkY) + abs(it.z - playerChunkZ)
+            }.thenBy { it.x }.thenBy { it.y }.thenBy { it.z })
+            .take(MAX_NEW_CHUNKS_PER_STATUS)
+            .map()
         { c ->
             Status.NewChunkInfo(
                 x = c.x,
                 y = c.y,
                 z = c.z,
-                blocks = MutableList(1 shl 12)
-                { i ->
-                    val blockX = (c.x shl 4) + (i and 0xF)
-                    val blockY = (c.y shl 4) + ((i shr 4) and 0xF)
-                    val blockZ = (c.z shl 4) + ((i shr 8) and 0xF)
-                    val blk = player.world.getBlockAt(blockX, blockY, blockZ)
-                    Status.BlockInfo(
-                        type = blk.type.key.toString(),
-                        passable = blk.isPassable,
-                    )
-                }
+                blocks = getChunkBlocks(player.world, c)
             )
-        }
+        }.toList()
 
-        existingChunks.keys.removeIf { it !in keepChunks }
-        existingChunks += newChunks.map { Status.KeepChunkInfo(it.x, it.y, it.z) to it.blocks }
+        existingChunks.retainAll(chunks)
+        existingChunks += newChunks.map { Status.KeepChunkInfo(it.x, it.y, it.z) }
 
-        val updateBlocks = unupdatedBlocks.map()
+        val updateBlocks = unupdatedBlocks.mapNotNull()
         { block ->
-            val chunk = existingChunks[Status.KeepChunkInfo(block.x shr 4, block.y shr 4, block.z shr 4)]
-            chunk?.set(
-                ((block.z and 0xF) shl 8) or ((block.y and 0xF) shl 4) or (block.x and 0xF),
-                Status.BlockInfo(
-                    type = block.type.key.toString(),
-                    passable = block.isPassable,
-                )
-            )
+            val chunk = Status.KeepChunkInfo(block.x shr 4, block.y shr 4, block.z shr 4)
+            if (chunk !in existingChunks) return@mapNotNull null
 
             Status.UpdateBlockInfo(
                 x = block.x,
@@ -240,22 +247,12 @@ class Client(
 
     private fun addBlockUpdate(block: Block)
     {
+        if (lastWorld != block.world.name) return
+        val blockChunk = Status.KeepChunkInfo(block.x shr 4, block.y shr 4, block.z shr 4)
         synchronized(this)
         {
             if (closed || !init) return
-            val blockChunkX = block.x shr 4
-            val blockChunkY = block.y shr 4
-            val blockChunkZ = block.z shr 4
-
-            val x = block.x and 0xF
-            val y = block.y and 0xF
-            val z = block.z and 0xF
-
-            val blockIndex = (z shl 8) or (y shl 4) or x
-
-            val chunk = existingChunks[Status.KeepChunkInfo(blockChunkX, blockChunkY, blockChunkZ)]
-
-            if (chunk != null && chunk[blockIndex] != Status.BlockInfo(block.type.key.toString(), block.isPassable))
+            if (blockChunk in existingChunks)
                 unupdatedBlocks.add(block)
         }
     }
@@ -263,10 +260,34 @@ class Client(
     companion object
     {
         const val LOAD_CHUNK_RADIUS = 3
+        const val LOAD_CHUNK_VERTICAL_RADIUS = 0
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = 3 * 16
+        const val MAX_NEW_CHUNKS_PER_STATUS = 4
 
         private val clients = ConcurrentHashMap<String, Client>()
+        private data class ChunkCacheKey(val world: String, val x: Int, val y: Int, val z: Int)
+        private val chunkCache = ConcurrentHashMap<ChunkCacheKey, List<Status.BlockInfo>>()
+
+        private fun getChunkBlocks(world: World, chunk: Status.KeepChunkInfo): List<Status.BlockInfo>
+        {
+            val key = ChunkCacheKey(world.name, chunk.x, chunk.y, chunk.z)
+            return chunkCache.computeIfAbsent(key)
+            {
+                List(1 shl 12)
+                { i ->
+                    val blockX = (chunk.x shl 4) + (i and 0xF)
+                    val blockY = (chunk.y shl 4) + ((i shr 4) and 0xF)
+                    val blockZ = (chunk.z shl 4) + ((i shr 8) and 0xF)
+                    val blk = world.getBlockAt(blockX, blockY, blockZ)
+                    Status.BlockInfo(
+                        type = blk.type.key.toString(),
+                        passable = blk.isPassable,
+                    )
+                }
+            }
+        }
+
         fun get(name: String): Client? = clients[name]
         fun closeAll()
         {
@@ -276,6 +297,7 @@ class Client(
 
         fun updateBlock(block: Block)
         {
+            chunkCache.remove(ChunkCacheKey(block.world.name, block.x shr 4, block.y shr 4, block.z shr 4))
             clients.values.forEach()
             { client ->
                 client.addBlockUpdate(block)

@@ -93,35 +93,38 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
             {
                 synchronized(conn)
                 {
-                    if (bots.containsKey(conn))
-                        submit { bots[conn]?.close() }
+                    bots.remove(conn)?.let { submit { it.close() } }
                     val client = Client(msg.name)
+                    bots[conn] = client
 
-                    client.init()
-                    { status ->
+                    client.init statusSender@ { status ->
+                        if (!conn.isOpen)
+                        {
+                            close(conn)
+                            return@statusSender
+                        }
                         runCatching()
                         {
                             conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
                         }.onFailure()
                         {
-                            warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+                            if (conn.isOpen)
+                                warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message ?: it::class.simpleName}")
                             conn.close()
                             close(conn)
                         }
                     }
-
-                    bots[conn] = client
                 }
             }
         }
     }
 
 
-    override fun onError(conn: WebSocket, ex: Exception)
+    override fun onError(conn: WebSocket?, ex: Exception)
     {
-        info("an error occurred on connection ${conn.remoteSocketAddress}: ${ex.message}")
-        conn.close()
-        close(conn)
+        info("an error occurred on connection ${conn?.remoteSocketAddress ?: "<server>"}: ${ex.message}")
+        conn?.close()
+        if (conn != null) close(conn)
     }
 
     override fun onStart() = info("服务器已启动!")
@@ -182,7 +185,7 @@ data class Status(
         val x: Int,
         val y: Int,
         val z: Int,
-        val blocks: MutableList<BlockInfo>,
+        val blocks: List<BlockInfo>,
     )
     {
         override fun equals(other: Any?): Boolean = other is NewChunkInfo && x == other.x && y == other.y && z == other.z
