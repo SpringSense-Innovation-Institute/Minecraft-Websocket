@@ -138,6 +138,7 @@ class Client(
     private val unupdatedBlocks = mutableSetOf<Block>()
 
     private val existingChunks = mutableSetOf<Status.KeepChunkInfo>()
+    private var chunkSnapshotCooldown = (name.hashCode() and Int.MAX_VALUE) % CHUNK_SNAPSHOT_INTERVAL_TICKS
 
     fun tick(): Status = synchronized(this)
     {
@@ -201,7 +202,19 @@ class Client(
         }
 
         val keepChunks = chunks.filter { it in existingChunks }
-        val newChunks = chunks.filter { it !in existingChunks }.take(MAX_NEW_CHUNKS_PER_STATUS).map()
+        val missingChunks = chunks.filter { it !in existingChunks }
+        val chunksToSnapshot = if (missingChunks.isNotEmpty() && chunkSnapshotCooldown <= 0)
+        {
+            chunkSnapshotCooldown = CHUNK_SNAPSHOT_INTERVAL_TICKS - 1
+            missingChunks.take(MAX_NEW_CHUNKS_PER_STATUS)
+        }
+        else
+        {
+            if (chunkSnapshotCooldown > 0)
+                chunkSnapshotCooldown--
+            emptyList()
+        }
+        val newChunks = chunksToSnapshot.map()
         { c ->
             Status.NewChunkInfo(
                 x = c.x,
@@ -285,6 +298,7 @@ class Client(
         const val UNLOAD_CHUNK_RADIUS = 4
         const val VIEW_ENTITY_RADIUS = 3 * 16
         private const val MAX_NEW_CHUNKS_PER_STATUS = 1
+        private const val CHUNK_SNAPSHOT_INTERVAL_TICKS = 5
         private const val MAX_PENDING_STATUSES = 5
         private const val MAX_FULL_STATUS_QUEUE_TICKS = 100
 
