@@ -31,6 +31,7 @@ class Client(
     private val statusList = mutableListOf<Status>()
     private var tickTask: PlatformTask? = null
     private var statusTask: PlatformTask? = null
+    private var fullStatusQueueTicks = 0
 
     fun init(updateStatus: (Status) -> Unit, closeConnection: () -> Unit)
     {
@@ -61,9 +62,12 @@ class Client(
                     val queueFull = synchronized(statusList) { statusList.size >= MAX_PENDING_STATUSES }
                     if (queueFull)
                     {
-                        closeConnection()
+                        fullStatusQueueTicks++
+                        if (fullStatusQueueTicks >= MAX_FULL_STATUS_QUEUE_TICKS)
+                            closeConnection()
                         return@submit
                     }
+                    fullStatusQueueTicks = 0
 
                     val newStatus = tick()
                     synchronized(statusList)
@@ -299,6 +303,7 @@ class Client(
         const val VIEW_ENTITY_RADIUS = 3 * 16
         private const val MAX_NEW_CHUNKS_PER_STATUS = 1
         private const val MAX_PENDING_STATUSES = 5
+        private const val MAX_FULL_STATUS_QUEUE_TICKS = 100
 
         private val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
