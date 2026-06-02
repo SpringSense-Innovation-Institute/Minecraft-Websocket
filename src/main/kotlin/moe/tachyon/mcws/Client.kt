@@ -8,6 +8,7 @@ import org.bukkit.block.Block
 import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import taboolib.common.platform.function.submit
+import taboolib.common.platform.service.PlatformExecutor.PlatformTask
 import taboolib.platform.util.isNotAir
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
@@ -21,10 +22,15 @@ class Client(
     var input = PlayerInput.EMPTY
         set(value) = synchronized(this) { field = value }
 
+    @Volatile
     private var closed = false
+    @Volatile
     private var init = false
     private lateinit var player: Player
     private val msg = mutableListOf<String>()
+    private val statusList = mutableListOf<Status>()
+    private var tickTask: PlatformTask? = null
+    private var statusTask: PlatformTask? = null
 
     fun init(updateStatus: (Status) -> Unit)
     {
@@ -44,11 +50,14 @@ class Client(
 
                 clients[name] = this
 
-                val statusList = mutableListOf<Status>()
-
-                submit(period = 1)
+                tickTask = submit(period = 1)
                 {
-                    if (closed) return@submit
+                    if (closed)
+                    {
+                        this.cancel()
+                        return@submit
+                    }
+
                     val newStatus = tick()
                     synchronized(statusList)
                     {
@@ -57,15 +66,22 @@ class Client(
                     }
                 }
 
-                submit(async = true)
+                statusTask = submit(async = true)
                 {
                     while (true)
                     {
-                        if (closed) return@submit
+                        if (closed)
+                        {
+                            this.cancel()
+                            return@submit
+                        }
+
                         val status = synchronized(statusList)
                         {
                             while (statusList.isEmpty() && !closed)
                                 (statusList as Object).wait(1000)
+                            if (closed)
+                                return@submit
                             val tmp = statusList.toList()
                             statusList.clear()
                             tmp
@@ -86,6 +102,13 @@ class Client(
                 if (closed) return
                 closed = true
                 clients.remove(name)
+                tickTask?.cancel()
+                statusTask?.cancel()
+                synchronized(statusList)
+                {
+                    (statusList as Object).notifyAll()
+                    statusList.clear()
+                }
                 if (!init) return
                 player.kickPlayer(null)
             }
