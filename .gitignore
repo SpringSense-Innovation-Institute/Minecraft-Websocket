@@ -4,6 +4,9 @@ build
 .kotlin
 bin
 
+### macOS ###
+.DS_Store
+
 ### VSCode ###
 .vscode
 
