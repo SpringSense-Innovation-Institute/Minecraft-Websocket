@@ -150,7 +150,7 @@ class BotNMSHandlerImpl: BotNMSHandler()
         nmsPlayer.yBodyRot = input.yaw
 
         nmsPlayer.isShiftKeyDown = input.sneak
-        nmsPlayer.isSprinting = input.sprint && input.w
+        nmsPlayer.isSprinting = input.sprint && input.w && nmsPlayer.foodData.foodLevel > 6
 
         nmsPlayer.abilities.flying = input.fly && nmsPlayer.abilities.mayfly
 
@@ -172,6 +172,7 @@ class BotNMSHandlerImpl: BotNMSHandler()
         nmsPlayer.zza = forward
         nmsPlayer.setJumping(input.jump)
         nmsPlayer.aiStep()
+        nmsPlayer.foodData.javaClass.methods.first { it.name == "tick" }.invoke(nmsPlayer.foodData, nmsPlayer)
         nmsPlayer.detectEquipmentUpdates()
 
         val newLocation = player.location.clone()
