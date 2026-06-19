@@ -40,8 +40,8 @@ class Client(
             synchronized(Client)
             {
                 if (init || closed) return
-                init = true
                 if (clients.containsKey(name)) error("Player $name already exists")
+                init = true
                 val loc = Bukkit.getOfflinePlayer(name).location?.takeIf { it.world != null } ?: Bukkit.getWorlds()[0].spawnLocation
 
                 player = BotNMSHandler.instance.spawnFakePlayer(name, loc)
@@ -86,12 +86,11 @@ class Client(
         {
             synchronized(Client)
             {
-                if (closed) return
+                if (closed || !init) return
                 closed = true
                 clients.remove(name)
                 existingChunks.clear()
                 unupdatedBlocks.clear()
-                if (!init) return
                 player.kickPlayer(null)
             }
         }

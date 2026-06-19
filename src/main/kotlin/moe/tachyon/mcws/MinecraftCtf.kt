@@ -108,17 +108,25 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
                     while (wait.compareAndSet(expectedValue = true, newValue = false))
                         Thread.sleep(50)
 
-                    client.init()
-                    { status ->
-                        runCatching()
-                        {
-                            conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
-                        }.onFailure()
-                        {
-                            warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
-                            conn.close()
-                            close(conn)
+                    runCatching()
+                    {
+                        client.init()
+                        { status ->
+                            runCatching()
+                            {
+                                conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
+                            }.onFailure()
+                            {
+                                warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+                                conn.close()
+                                close(conn)
+                            }
                         }
+                    }.onFailure()
+                    {
+                        warning("failed to initialize client for ${conn.remoteSocketAddress}: ${it.message}")
+                        conn.close()
+                        close(conn)
                     }
                 }
             }
