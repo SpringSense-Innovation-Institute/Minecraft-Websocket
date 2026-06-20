@@ -6,7 +6,6 @@ import io.izzel.taboolib.gradle.BukkitNMSEntityAI
 import io.izzel.taboolib.gradle.BukkitNMSItemTag
 import io.izzel.taboolib.gradle.BukkitNMSUtil
 import io.izzel.taboolib.gradle.BukkitNavigation
-import io.izzel.taboolib.gradle.BukkitUI
 import io.izzel.taboolib.gradle.BukkitUtil
 import io.izzel.taboolib.gradle.CommandHelper
 import io.izzel.taboolib.gradle.MinecraftChat
@@ -23,6 +22,7 @@ plugins {
 }
 
 taboolib {
+    rootPackage = "moe.tachyon.mcws"
     env {
         install(Basic)
         install(BukkitNMS)
@@ -31,7 +31,6 @@ taboolib {
         install(BukkitNMSItemTag)
         install(BukkitNMSUtil)
         install(BukkitNavigation)
-        install(BukkitUI)
         install(BukkitUtil)
         install(CommandHelper)
         install(MinecraftChat)
@@ -46,7 +45,7 @@ taboolib {
     }
     version { taboolib = "6.3.0-c6f096d" }
     relocate("kotlinx.serialization", "moe.tachyon.mcws.kotlinx.serialization")
-    relocate("org.java-websocket", "moe.tachyon.mcws.org.java_websocket")
+    relocate("org.java_websocket", "moe.tachyon.mcws.org.java_websocket")
 }
 
 repositories {
