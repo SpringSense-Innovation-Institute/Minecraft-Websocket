@@ -35,71 +35,106 @@ class Client(
 
     fun init(updateStatus: (Status) -> Unit)
     {
-        synchronized(this)
+        check(Bukkit.isPrimaryThread()) { "Client.init must run on the main server thread" }
+        if (clients.putIfAbsent(name, this) != null) error("Player $name already exists")
+
+        runCatching()
         {
-            synchronized(Client)
+            val loc = Bukkit.getOfflinePlayer(name).location?.takeIf { it.world != null } ?: Bukkit.getWorlds()[0].spawnLocation
+            val spawnedPlayer = BotNMSHandler.instance.spawnFakePlayer(name, loc)
             {
-                if (init || closed) return
-                if (clients.containsKey(name)) error("Player $name already exists")
+                synchronized(this) { msg.add(it) }
+            }
+
+            synchronized(this)
+            {
+                if (closed) error("Client $name is already closed")
+                player = spawnedPlayer
                 init = true
-                val loc = Bukkit.getOfflinePlayer(name).location?.takeIf { it.world != null } ?: Bukkit.getWorlds()[0].spawnLocation
+            }
 
-                player = BotNMSHandler.instance.spawnFakePlayer(name, loc)
+            submit(async = false, period = 1)
+            {
+                if (closed) return@submit cancel()
+                synchronized(statusLock)
                 {
-                    synchronized(this) { msg.add(it) }
-                }
-
-                clients[name] = this
-
-                submit(period = 1)
-                {
-                    if (closed) return@submit cancel()
-                    synchronized(statusLock)
-                    {
-                        val newStatus = tick(pendingStatus == null)
-                        if (newStatus != null) pendingStatus = newStatus
-                        statusLock.notifyAll()
-                    }
-                }
-
-                submit(async = true)
-                {
-                    while (true)
-                    {
-                        if (closed) return@submit
-                        val status = synchronized(statusLock)
-                        {
-                            while (pendingStatus == null && !closed)
-                                statusLock.wait(1000)
-                            pendingStatus.also { pendingStatus = null }
-                        }
-                        updateStatus(status ?: continue)
-                    }
+                    val newStatus = tick(pendingStatus == null)
+                    if (newStatus != null) pendingStatus = newStatus
+                    statusLock.notifyAll()
                 }
             }
+
+            submit(async = true)
+            {
+                while (true)
+                {
+                    if (closed) return@submit
+                    val status = synchronized(statusLock)
+                    {
+                        while (pendingStatus == null && !closed)
+                            statusLock.wait(1000)
+                        pendingStatus.also { pendingStatus = null }
+                    }
+                    updateStatus(status ?: continue)
+                }
+            }
+        }.onFailure()
+        {
+            synchronized(this)
+            {
+                closed = true
+                init = false
+                existingChunks.clear()
+                unupdatedBlocks.clear()
+            }
+            clients.remove(name, this)
+            synchronized(statusLock)
+            {
+                pendingStatus = null
+                statusLock.notifyAll()
+            }
+            throw it
         }
+    }
+
+    private fun closeOnMainThread()
+    {
+        synchronized(this)
+        {
+            if (closed) return
+            closed = true
+            clients.remove(name, this)
+            existingChunks.clear()
+            unupdatedBlocks.clear()
+            if (!init) return
+        }
+
+        synchronized(statusLock)
+        {
+            pendingStatus = null
+            statusLock.notifyAll()
+        }
+
+        player.kickPlayer(null)
     }
 
     fun close()
     {
-        synchronized(this)
+        if (Bukkit.isPrimaryThread())
         {
-            synchronized(Client)
-            {
-                if (closed || !init) return
-                closed = true
-                clients.remove(name)
-                existingChunks.clear()
-                unupdatedBlocks.clear()
-                player.kickPlayer(null)
-            }
+            closeOnMainThread()
+            return
+        }
+        submit(async = false)
+        {
+            closeOnMainThread()
         }
     }
 
     fun chat(message: String) = synchronized(this)
     {
         if (!closed && init)
-            submit { player.chat(message) }
+            submit(async = false) { player.chat(message) }
     }
 
     private var lastWorld = ""
@@ -276,8 +311,7 @@ class Client(
         fun get(name: String): Client? = clients[name]
         fun closeAll()
         {
-            clients.values.forEach(Client::close)
-            clients.clear()
+            clients.values.toList().forEach(Client::close)
         }
 
         fun updateBlock(block: Block)
