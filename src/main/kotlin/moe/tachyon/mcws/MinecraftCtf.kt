@@ -114,7 +114,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
         {
             is ReceivedMessage.Chat  -> bots[conn]?.chat(msg.message)
             is ReceivedMessage.Input -> bots[conn]?.input = msg.input
-            is ReceivedMessage.Login -> submit(async = false) { login(conn, msg.name) }
+            is ReceivedMessage.Login -> login(conn, msg.name)
         }
     }
 
@@ -122,27 +122,34 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     {
         if (!conn.isOpen) return
 
-        bots.remove(conn)?.close()
-        if (!conn.isOpen) return
         val client = Client(name)
-        bots[conn] = client
+        val previous = bots.put(conn, client)
 
-        runCatching()
+        submit(async = false)
         {
-            client.init()
+            previous?.close()
+            if (bots[conn] !== client || !conn.isOpen)
             {
-                status -> sendStatus(conn, status)
+                client.close()
+                return@submit
             }
-        }.onFailure()
-        {
-            warning("failed to initialize client for ${conn.remoteSocketAddress}: ${it.message}")
-            bots.remove(conn, client)
-            client.close()
-            runCatching { conn.close() }
+
+            runCatching()
+            {
+                client.init()
+                {
+                    status -> sendStatus(conn, client, status)
+                }
+            }.onFailure()
+            {
+                warning("failed to initialize client for ${conn.remoteSocketAddress}: ${it.message}")
+                close(conn, client)
+                runCatching { conn.close() }
+            }
         }
     }
 
-    private fun sendStatus(conn: WebSocket, status: Status)
+    private fun sendStatus(conn: WebSocket, client: Client, status: Status)
     {
         runCatching()
         {
@@ -150,7 +157,7 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
         }.onFailure()
         {
             warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
-            close(conn)
+            close(conn, client)
             runCatching { conn.close() }
         }
     }
@@ -179,6 +186,12 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
     private fun close(conn: WebSocket)
     {
         bots.remove(conn)?.close()
+    }
+
+    private fun close(conn: WebSocket, client: Client)
+    {
+        if (bots.remove(conn, client))
+            client.close()
     }
 }
 
