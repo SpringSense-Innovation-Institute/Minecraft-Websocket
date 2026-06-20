@@ -17,7 +17,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     java
     application
-    id("io.izzel.taboolib") version "2.0.36"
+    id("io.izzel.taboolib") version "2.0.37"
     kotlin("jvm") version "2.3.20"
     kotlin("plugin.serialization") version "2.3.20"
 }
@@ -44,7 +44,7 @@ taboolib {
             name("CyanTachyon")
         }
     }
-    version { taboolib = "6.3.0-932e79c" }
+    version { taboolib = "6.3.0-c6f096d" }
     relocate("kotlinx.serialization", "moe.tachyon.mcws.kotlinx.serialization")
     relocate("org.java-websocket", "moe.tachyon.mcws.org.java_websocket")
 }
