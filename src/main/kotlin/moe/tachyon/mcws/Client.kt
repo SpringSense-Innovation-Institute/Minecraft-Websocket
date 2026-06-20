@@ -40,42 +40,38 @@ class Client(
             synchronized(Client)
             {
                 if (init || closed) return
-                if (clients.containsKey(name)) error("Player $name already exists")
                 init = true
                 val loc = Bukkit.getOfflinePlayer(name).location?.takeIf { it.world != null } ?: Bukkit.getWorlds()[0].spawnLocation
 
-                player = BotNMSHandler.instance.spawnFakePlayer(name, loc)
-                {
-                    synchronized(this) { msg.add(it) }
-                }
+                player = BotNMSHandler.instance.spawnFakePlayer(name, loc, msg::add)
 
                 clients[name] = this
+            }
+        }
 
-                submit(period = 1)
-                {
-                    if (closed) return@submit cancel()
-                    synchronized(statusLock)
-                    {
-                        val newStatus = tick(pendingStatus == null)
-                        if (newStatus != null) pendingStatus = newStatus
-                        statusLock.notifyAll()
-                    }
-                }
+        submit(period = 1)
+        {
+            if (closed) return@submit cancel()
+            synchronized(statusLock)
+            {
+                val newStatus = tick(pendingStatus == null)
+                if (newStatus != null) pendingStatus = newStatus
+                statusLock.notifyAll()
+            }
+        }
 
-                submit(async = true)
+        submit(async = true)
+        {
+            while (true)
+            {
+                if (closed) return@submit
+                val status = synchronized(statusLock)
                 {
-                    while (true)
-                    {
-                        if (closed) return@submit
-                        val status = synchronized(statusLock)
-                        {
-                            while (pendingStatus == null && !closed)
-                                statusLock.wait(1000)
-                            pendingStatus.also { pendingStatus = null }
-                        }
-                        updateStatus(status ?: continue)
-                    }
+                    while (pendingStatus == null && !closed)
+                        statusLock.wait(1000)
+                    pendingStatus.also { pendingStatus = null }
                 }
+                updateStatus(status ?: continue)
             }
         }
     }
@@ -91,9 +87,9 @@ class Client(
                 clients.remove(name)
                 existingChunks.clear()
                 unupdatedBlocks.clear()
-                player.kickPlayer(null)
             }
         }
+        player.kickPlayer(null)
     }
 
     fun chat(message: String) = synchronized(this)
@@ -272,7 +268,7 @@ class Client(
         const val VIEW_ENTITY_RADIUS = LOAD_CHUNK_RADIUS * 16
         const val MAX_NEW_CHUNK_PER_TICK = 16
 
-        private val clients = ConcurrentHashMap<String, Client>()
+        val clients = ConcurrentHashMap<String, Client>()
         fun get(name: String): Client? = clients[name]
         fun closeAll()
         {

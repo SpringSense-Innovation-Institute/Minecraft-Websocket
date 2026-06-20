@@ -7,7 +7,9 @@ import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelPromise
 import io.netty.channel.embedded.EmbeddedChannel
 import io.netty.util.ReferenceCountUtil
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonIgnoreUnknownKeys
 import net.minecraft.network.NetworkManager
 import net.minecraft.network.protocol.EnumProtocolDirection
 import net.minecraft.network.protocol.game.ClientboundDisguisedChatPacket
@@ -34,7 +36,9 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlin.uuid.toJavaUuid
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
+@JsonIgnoreUnknownKeys
 data class PlayerInput(
     val yaw: Float = 0.0f, val pitch: Float = 0.0f,
     val w: Boolean = false, val a: Boolean = false, val s: Boolean = false, val d: Boolean = false,

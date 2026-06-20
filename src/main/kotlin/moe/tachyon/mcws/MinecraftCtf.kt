@@ -68,7 +68,7 @@ data class Config(
 
 class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 {
-    private val bots = ConcurrentHashMap<WebSocket, Client>()
+    val bots = ConcurrentHashMap<WebSocket, Client>()
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake)
     {
@@ -104,9 +104,6 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
                         submit { bots[conn]?.close() }
                     val client = Client(msg.name)
                     bots[conn] = client
-
-                    while (wait.compareAndSet(expectedValue = true, newValue = false))
-                        Thread.sleep(50)
 
                     runCatching()
                     {
