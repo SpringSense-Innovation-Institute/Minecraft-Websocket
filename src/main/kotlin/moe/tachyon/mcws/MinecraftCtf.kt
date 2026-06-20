@@ -1,12 +1,9 @@
-@file:OptIn(ExperimentalAtomicApi::class)
-
 package moe.tachyon.mcws
 
 import com.github.luben.zstd.Zstd
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import moe.tachyon.mcws.MinecraftWebsocketPlugin.wait
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
@@ -17,8 +14,8 @@ import taboolib.common.platform.function.warning
 import taboolib.platform.BukkitPlugin
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.concurrent.atomics.AtomicBoolean
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 object MinecraftWebsocketPlugin: Plugin()
 {
@@ -45,12 +42,16 @@ object MinecraftWebsocketPlugin: Plugin()
     }
 
     val server by lazy { SimpleServer(config.port) }
-    val wait = AtomicBoolean(false)
 
     override fun onEnable()
     {
         server.start()
-        submit(period = 1) { wait.store(false) }
+        val startupFailure = server.awaitStartup(timeout = 5, unit = TimeUnit.SECONDS)
+        if (startupFailure != null)
+        {
+            runCatching { server.stop() }
+            throw IllegalStateException("Failed to start WebSocket server on port ${config.port}", startupFailure)
+        }
     }
 
     override fun onDisable()
@@ -69,6 +70,23 @@ data class Config(
 class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 {
     private val bots = ConcurrentHashMap<WebSocket, Client>()
+    private val startupLatch = CountDownLatch(1)
+    @Volatile
+    private var startupFailure: Exception? = null
+
+    fun awaitStartup(timeout: Long, unit: TimeUnit): Exception?
+    {
+        return runCatching()
+        {
+            if (startupLatch.await(timeout, unit))
+                startupFailure
+            else
+                IllegalStateException("Timed out waiting for WebSocket server startup")
+        }.getOrElse()
+        {
+            it as? Exception ?: RuntimeException(it)
+        }
+    }
 
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake)
     {
@@ -94,59 +112,86 @@ class SimpleServer(port: Int) : WebSocketServer(InetSocketAddress(port))
 
         when (msg)
         {
-            is ReceivedMessage.Chat  -> synchronized(conn) { bots[conn]?.chat(msg.message) }
-            is ReceivedMessage.Input -> synchronized(conn) { bots[conn]?.input = msg.input }
-            is ReceivedMessage.Login ->
+            is ReceivedMessage.Chat  -> bots[conn]?.chat(msg.message)
+            is ReceivedMessage.Input -> bots[conn]?.input = msg.input
+            is ReceivedMessage.Login -> login(conn, msg.name)
+        }
+    }
+
+    private fun login(conn: WebSocket, name: String)
+    {
+        if (!conn.isOpen) return
+
+        val client = Client(name)
+        val previous = bots.put(conn, client)
+
+        submit(async = false)
+        {
+            previous?.close()
+            if (bots[conn] !== client || !conn.isOpen)
             {
-                synchronized(conn)
+                client.close()
+                return@submit
+            }
+
+            runCatching()
+            {
+                client.init()
                 {
-                    if (bots.containsKey(conn))
-                        submit { bots[conn]?.close() }
-                    val client = Client(msg.name)
-                    bots[conn] = client
-
-                    while (wait.compareAndSet(expectedValue = true, newValue = false))
-                        Thread.sleep(50)
-
-                    runCatching()
-                    {
-                        client.init()
-                        { status ->
-                            runCatching()
-                            {
-                                conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
-                            }.onFailure()
-                            {
-                                warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
-                                conn.close()
-                                close(conn)
-                            }
-                        }
-                    }.onFailure()
-                    {
-                        warning("failed to initialize client for ${conn.remoteSocketAddress}: ${it.message}")
-                        conn.close()
-                        close(conn)
-                    }
+                    status -> sendStatus(conn, client, status)
                 }
+            }.onFailure()
+            {
+                warning("failed to initialize client for ${conn.remoteSocketAddress}: ${it.message}")
+                close(conn, client)
+                runCatching { conn.close() }
             }
         }
     }
 
-
-    override fun onError(conn: WebSocket, ex: Exception)
+    private fun sendStatus(conn: WebSocket, client: Client, status: Status)
     {
-        info("an error occurred on connection ${conn.remoteSocketAddress}: ${ex.message}")
-        conn.close()
+        runCatching()
+        {
+            conn.send(Zstd.compress(Json.encodeToString(status).toByteArray()))
+        }.onFailure()
+        {
+            warning("failed to send status to ${conn.remoteSocketAddress}: ${it.message}")
+            close(conn, client)
+            runCatching { conn.close() }
+        }
+    }
+
+
+    override fun onError(conn: WebSocket?, ex: Exception)
+    {
+        if (conn == null)
+        {
+            startupFailure = ex
+            startupLatch.countDown()
+            warning("websocket server error: ${ex.message}")
+            return
+        }
+        warning("an error occurred on connection ${conn.remoteSocketAddress}: ${ex.message}")
+        runCatching { conn.close() }
         close(conn)
     }
 
-    override fun onStart() = info("服务器已启动!")
+    override fun onStart()
+    {
+        info("服务器已启动!")
+        startupLatch.countDown()
+    }
 
     private fun close(conn: WebSocket)
     {
-        val bot = synchronized(this) { bots.remove(conn) } ?: return
-        submit { bot.close() }
+        bots.remove(conn)?.close()
+    }
+
+    private fun close(conn: WebSocket, client: Client)
+    {
+        if (bots.remove(conn, client))
+            client.close()
     }
 }
 
