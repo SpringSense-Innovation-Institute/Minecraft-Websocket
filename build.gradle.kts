@@ -39,7 +39,7 @@ taboolib {
         install(JavaScript)
     }
     description {
-        name = "Minecraft-Websocekt"
+        name = "Minecraft-Websocket"
         contributors {
             name("CyanTachyon")
         }
