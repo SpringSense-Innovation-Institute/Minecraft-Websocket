@@ -1,14 +1,14 @@
 # Minecraft-Websocket
 
-通过 WebSocket 控制 Minecraft 玩家移动和交互的 Bukkit 插件。
+面向专用客户端、通过 WebSocket 控制 Minecraft 假玩家移动和交互的 Bukkit 插件，目标版本为 Minecraft 1.21.1。
 
-在 Minecraft 服务器上启动一个 WebSocket 服务端，允许外部客户端连接后控制一个"假玩家"（Fake Player），实时获取玩家状态并下发操作指令。
+在 Minecraft 服务器上启动一个 WebSocket 服务端，允许外部客户端连接后控制一个假玩家（Fake Player），实时获取玩家状态并下发操作指令。
 
 ## 工作原理
 
 1. 插件在 Bukkit 服务端上启动一个 WebSocket 服务端（默认端口 `8080`）
 2. 外部客户端通过 WebSocket 连接，发送 `login` 消息以生成指定用户名的假玩家
-3. 每个游戏 tick（约 50ms），插件收集假玩家的完整状态（位置、血量、周围实体、区块数据、背包、聊天消息），经 Zstd 压缩后推送
+3. 插件按游戏 tick（正常运行时约 50ms）更新假玩家，并在上一份待发送状态被取走后收集下一份状态（位置、血量、周围实体、区块数据、背包、聊天消息），经 Zstd 压缩后异步推送
 4. 客户端在任意时刻可发送 `input` 消息来控制假玩家的移动视角和动作，或发送 `chat` 消息让假玩家发送聊天
 5. 断开连接时，假玩家自动被踢出
 
@@ -28,7 +28,7 @@
 
 ## WebSocket 协议
 
-所有消息均为 JSON 文本，使用密封类型多态序列化（`@SerialName` 区分消息类型）。服务端推送的状态消息使用 **Zstd** 压缩后的二进制帧发送。
+客户端发送 JSON 文本帧，通过 `type` 字段区分消息类型。服务端将状态序列化为 JSON，再使用 **Zstd** 压缩后以二进制帧发送。
 
 ### 客户端 → 服务端
 
@@ -46,12 +46,11 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"login"` | 消息类型标识 |
-| `name` | `String` | 假玩家的用户名（必须对应一个已存在的离线玩家或在线玩家名） |
+| `name` | `String` | 假玩家的用户名，用于查找玩家 UUID 和已有位置记录 |
 
 **行为：**
-- 如果同一 WebSocket 连接已有假玩家，先关闭旧的再创建新的
 - 假玩家出生在该用户名上次下线的位置；若无记录则出生在世界出生点
-- 同一用户名只能有一个活跃的假玩家，重复登录会报错
+- 客户端应为每个连接发送一次 `login`，并为不同连接使用不同的用户名
 - 登录成功后，服务端开始按 tick 推送 `Status` 二进制帧
 
 #### Input - 输入控制
@@ -72,7 +71,7 @@
     "sneak": false,
     "sprint": true,
     "fly": false,
-    "attack": "550e8400-e29b-41d4-a716-446655440000"
+    "attack": "550e8400e29b41d4a716446655440000"
   }
 }
 ```
@@ -87,7 +86,7 @@
 | `d` | `Boolean` | `false` | 向右平移 |
 | `jump` | `Boolean` | `false` | 跳跃 |
 | `sneak` | `Boolean` | `false` | 潜行（移动速度降为 30%） |
-| `sprint` | `Boolean` | `false` | 疾跑（需同时 `w = true`） |
+| `sprint` | `Boolean` | `false` | 疾跑（需同时 `w = true` 且饥饿值大于 6） |
 | `fly` | `Boolean` | `false` | 飞行（需要该玩家有飞行权限） |
 | `attack` | `String?` | `null` | 攻击目标的实体 UUID（十六进制格式），攻击后自动重置为 `null` |
 
@@ -114,18 +113,18 @@
 
 ### 服务端 → 客户端
 
-服务端每个 tick 推送一个 `Status` 二进制帧（Zstd 压缩的 JSON）。解压后格式如下：
+服务端异步推送 `Status` 二进制帧（Zstd 压缩的 JSON），实际频率取决于游戏 tick 和状态处理速度。解压后的示例如下，列表字段以空数组展示：
 
 ```json
 {
   "playerLocation": { "x": 100.5, "y": 64.0, "z": -200.5 },
   "playerHealth": 20.0,
   "playerFoodLevel": 20,
-  "nearbyEntities": [...],
-  "keepChunks": [...],
-  "newChunks": [...],
-  "updateBlocks": [...],
-  "backpack": [...],
+  "nearbyEntities": [],
+  "keepChunks": [],
+  "newChunks": [],
+  "updateBlocks": [],
+  "backpack": [],
   "messages": ["<Steve> Hello"]
 }
 ```
@@ -135,9 +134,9 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `playerLocation` | `Location` | 玩家当前坐标 |
-| `playerHealth` | `Double` | 玩家当前血量（0.0 ~ 20.0） |
+| `playerHealth` | `Double` | 玩家当前血量（默认最大值为 20.0） |
 | `playerFoodLevel` | `Int` | 玩家当前饥饿值（0 ~ 20） |
-| `nearbyEntities` | `List<EntityInfo>` | 半径 48 格内的实体列表 |
+| `nearbyEntities` | `List<EntityInfo>` | 玩家周围各坐标轴方向 48 格范围内的实体列表 |
 | `keepChunks` | `List<KeepChunkInfo>` | 仍在视野内、无需重发的已加载区块坐标 |
 | `newChunks` | `List<NewChunkInfo>` | 新进入视野的区块（包含完整方块数据） |
 | `updateBlocks` | `List<UpdateBlockInfo>` | 自上次 tick 以来发生变化的方块 |
@@ -190,7 +189,7 @@
 
 #### NewChunkInfo
 
-新进入视野的区块，包含完整的 4096 个方块数据。
+新进入视野的区块，包含完整的 4096 个方块数据。以下仅展示前两项；实际 `blocks` 数组包含 4096 个 `BlockInfo` 对象。
 
 ```json
 {
@@ -199,8 +198,7 @@
   "z": -13,
   "blocks": [
     { "type": "minecraft:stone", "passable": false },
-    { "type": "minecraft:air", "passable": true },
-    "...共 4096 个"
+    { "type": "minecraft:air", "passable": true }
   ]
 }
 ```
@@ -257,6 +255,7 @@
 - **加载半径**：`LOAD_CHUNK_RADIUS = 3`（即玩家周围 7×7×7 个区块）
 - **卸载半径**：`UNLOAD_CHUNK_RADIUS = 4`（超出加载半径但在卸载半径内的区块会保留）
 - **实体可视半径**：`VIEW_ENTITY_RADIUS = 48`（3 × 16 格）
+- **每次状态采集的新区块上限**：`MAX_NEW_CHUNK_PER_TICK = 16`，其余新区块在后续状态中逐步发送
 
 客户端侧的区块管理策略：
 1. 首次出现的区块出现在 `newChunks` 中（含完整方块数据）
@@ -297,8 +296,8 @@
 | 组件 | 版本 / 说明 |
 |------|-------------|
 | Kotlin | 2.3.20 |
-| TabooLib | 6.3.0 (Gradle 插件 2.0.36) |
-| Java | 17 |
+| TabooLib | 6.3.0-c6f096d（Gradle 插件 2.0.37） |
+| Java 编译目标 | 17 |
 | Java-WebSocket | 1.6.0 |
 | kotlinx-serialization-json | 1.11.0 |
 | zstd-jni | 1.5.7-8 |
